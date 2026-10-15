@@ -84,7 +84,25 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Sign-in failed:', err);
-      alert(`Sign in error: ${err.message || 'Authentication cancelled'}`);
+      const isUnauthorizedDomain =
+        err.code === 'auth/unauthorized-domain' ||
+        err.message?.includes('unauthorized-domain');
+
+      if (isUnauthorizedDomain) {
+        const domain = window.location.hostname;
+        alert(
+          `Domain Authorization Needed for Vercel:\n\n` +
+          `Your live domain "${domain}" must be added to your Firebase Authorized Domains.\n\n` +
+          `Quick Fix (takes 30 seconds):\n` +
+          `1. Open: https://console.firebase.google.com/\n` +
+          `2. Select your project ("gen-lang-client-0969575649")\n` +
+          `3. Navigate to: Authentication -> Settings tab -> Authorized domains\n` +
+          `4. Click "Add domain" and type: ${domain}\n` +
+          `5. Click Save, then click "Connect Gmail" again!`
+        );
+      } else {
+        alert(`Sign in error: ${err.message || 'Authentication cancelled'}`);
+      }
     } finally {
       setIsConnecting(false);
     }
