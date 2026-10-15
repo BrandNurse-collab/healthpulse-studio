@@ -1,0 +1,6 @@
+{
+  "name": "HealthPulse Studio",
+  "description": "AI-powered email marketing, blog publishing, external content repurposing, and automated newsletter engine for healthcare organizations with direct Gmail integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
