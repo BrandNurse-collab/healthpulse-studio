@@ -83,6 +83,11 @@ export const api = {
   deleteCampaign: (id: string) =>
     apiRequest(`/api/campaigns/${id}`, { method: 'DELETE' }),
 
+  // Email Engine Settings (Gmail vs High-Volume Resend/SendGrid)
+  getEmailEngineSettings: () => apiRequest('/api/settings/email-engine'),
+  saveEmailEngineSettings: (data: any) =>
+    apiRequest('/api/settings/email-engine', { method: 'POST', body: JSON.stringify(data) }),
+
   // Templates
   getTemplates: () => apiRequest('/api/templates'),
 

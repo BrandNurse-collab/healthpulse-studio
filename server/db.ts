@@ -157,6 +157,13 @@ export interface DatabaseSchema {
     organizationName: string;
     senderName: string;
     senderEmail: string;
+    emailEngine?: {
+      provider: 'gmail' | 'resend' | 'sendgrid';
+      resendApiKey?: string;
+      sendgridApiKey?: string;
+      fromEmail?: string;
+      fromName?: string;
+    };
   };
 }
 
@@ -179,6 +186,13 @@ function getInitialData(): DatabaseSchema {
       organizationName: 'HealthPulse Education & Career Network',
       senderName: 'HealthPulse Editorial Team',
       senderEmail: 'editorial@healthpulse.org',
+      emailEngine: {
+        provider: 'gmail',
+        resendApiKey: '',
+        sendgridApiKey: '',
+        fromEmail: 'newsletter@healthpulse.org',
+        fromName: 'HealthPulse Editorial'
+      }
     },
     segments: [
       { id: 'all', name: 'All Confirmed Subscribers', description: 'Every active consented recipient', criteria: { status: 'subscribed' } },

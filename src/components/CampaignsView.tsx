@@ -14,6 +14,9 @@ import {
   RefreshCw,
   ExternalLink,
   ShieldCheck,
+  Zap,
+  Sliders,
+  Settings,
   X
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -85,19 +88,36 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   // View logs modal
   const [selectedCampaignForLogs, setSelectedCampaignForLogs] = useState<Campaign | null>(null);
 
+  // Email delivery engine state (Gmail vs High-Volume Resend/SendGrid)
+  const [emailEngine, setEmailEngine] = useState<any>({ provider: 'gmail' });
+  const [isEngineSettingsOpen, setIsEngineSettingsOpen] = useState(false);
+  const [tempProvider, setTempProvider] = useState<'gmail' | 'resend' | 'sendgrid'>('gmail');
+  const [tempResendKey, setTempResendKey] = useState('');
+  const [tempSendGridKey, setTempSendGridKey] = useState('');
+  const [tempFromEmail, setTempFromEmail] = useState('newsletter@healthpulse.org');
+  const [tempFromName, setTempFromName] = useState('HealthPulse Editorial');
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [cRes, tRes, sRes, subRes] = await Promise.all([
+      const [cRes, tRes, sRes, subRes, engRes] = await Promise.all([
         api.getCampaigns(),
         api.getTemplates(),
         api.getSegments(),
-        api.getSubscribers()
+        api.getSubscribers(),
+        api.getEmailEngineSettings().catch(() => ({ emailEngine: { provider: 'gmail' } }))
       ]);
       setCampaigns(cRes.campaigns || []);
       setTemplates(tRes.templates || []);
       setSegments(sRes.segments || []);
       setSubscribers(subRes.subscribers || []);
+
+      if (engRes?.emailEngine) {
+        setEmailEngine(engRes.emailEngine);
+        setTempProvider(engRes.emailEngine.provider || 'gmail');
+        setTempFromEmail(engRes.emailEngine.fromEmail || 'newsletter@healthpulse.org');
+        setTempFromName(engRes.emailEngine.fromName || 'HealthPulse Editorial');
+      }
     } catch (err) {
       console.error('Failed to load campaigns:', err);
     } finally {
@@ -180,8 +200,27 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
     }
   };
 
+  const handleSaveEngineSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await api.saveEmailEngineSettings({
+        provider: tempProvider,
+        resendApiKey: tempResendKey,
+        sendgridApiKey: tempSendGridKey,
+        fromEmail: tempFromEmail,
+        fromName: tempFromName
+      });
+      setEmailEngine(res.emailEngine);
+      setIsEngineSettingsOpen(false);
+      alert(`Email engine updated to ${tempProvider.toUpperCase()} successfully!`);
+    } catch (err: any) {
+      alert(`Failed to save settings: ${err.message}`);
+    }
+  };
+
   const handleSendTestEmail = async () => {
-    if (!isGmailConnected) {
+    const isHighVolume = emailEngine?.provider === 'resend' || emailEngine?.provider === 'sendgrid';
+    if (!isHighVolume && !isGmailConnected) {
       onConnectGmail();
       return;
     }
@@ -201,8 +240,8 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
           name: `[Test Draft] ${campaignName}`,
           subject,
           preheader,
-          senderName,
-          senderEmail,
+          senderName: isHighVolume ? emailEngine.fromName : senderName,
+          senderEmail: isHighVolume ? emailEngine.fromEmail : senderEmail,
           replyTo,
           htmlBody,
           targetSegmentId,
@@ -217,11 +256,11 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
       }
 
       await api.testSendCampaign(tempCampaignId, testEmailAddress, {
-        senderName,
-        senderEmail
+        senderName: isHighVolume ? emailEngine.fromName : senderName,
+        senderEmail: isHighVolume ? emailEngine.fromEmail : senderEmail
       });
 
-      setTestSendStatus(`Test preview successfully dispatched to ${testEmailAddress} via Gmail API.`);
+      setTestSendStatus(`Test preview successfully dispatched to ${testEmailAddress} via ${emailEngine.provider.toUpperCase()}.`);
     } catch (err: any) {
       setTestSendStatus(`Error: ${err.message}`);
     } finally {
@@ -230,7 +269,8 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   };
 
   const handleInitiateSend = (campaign: Campaign) => {
-    if (!isGmailConnected) {
+    const isHighVolume = emailEngine?.provider === 'resend' || emailEngine?.provider === 'sendgrid';
+    if (!isHighVolume && !isGmailConnected) {
       onConnectGmail();
       return;
     }
@@ -275,16 +315,33 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {!isGmailConnected && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsEngineSettingsOpen(true)}
+            className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 shadow-xs ${
+              emailEngine?.provider === 'resend' || emailEngine?.provider === 'sendgrid'
+                ? 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100'
+                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="Configure delivery engine (Gmail vs High-Volume)"
+          >
+            <Zap className={`w-4 h-4 ${emailEngine?.provider !== 'gmail' ? 'text-purple-600' : 'text-slate-400'}`} />
+            <span>
+              Engine: {emailEngine?.provider === 'resend' ? 'Resend (High-Volume 100k+)' : emailEngine?.provider === 'sendgrid' ? 'SendGrid (Enterprise)' : 'Gmail API (2k/day)'}
+            </span>
+            <Settings className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
+          </button>
+
+          {emailEngine?.provider === 'gmail' && !isGmailConnected && (
             <button
               onClick={onConnectGmail}
               className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
             >
               <AlertCircle className="w-4 h-4" />
-              <span>Connect Gmail to Enable Sending</span>
+              <span>Connect Gmail to Send</span>
             </button>
           )}
+
           <button
             onClick={handleOpenNewCampaign}
             className="px-4 py-2 bg-slate-900 hover:bg-cyan-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
@@ -627,17 +684,30 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
       {isConfirmSendOpen && campaignToDispatch && (
         <ConfirmationModal
           isOpen={isConfirmSendOpen}
-          title={`Confirm Live Gmail Dispatch`}
-          message={`You are about to broadcast "${campaignToDispatch.name}" via your connected Google Workspace account. Messages will be sent individually to each eligible subscriber.`}
-          confirmLabel={isSendingCampaign ? 'Dispatching...' : 'Confirm & Send Broadcast'}
+          title={`Confirm Live Campaign Broadcast`}
+          message={`You are about to broadcast "${campaignToDispatch.name}". Messages will be sent individually with strict recipient privacy.`}
+          confirmLabel={isSendingCampaign ? 'Dispatching Broadcast...' : 'Confirm & Send Broadcast'}
           onConfirm={handleConfirmSend}
           onCancel={() => setIsConfirmSendOpen(false)}
           details={[
+            {
+              label: 'Delivery Engine',
+              value: emailEngine?.provider === 'resend'
+                ? '⚡ Resend API (High-Volume — No 2,000/day limit)'
+                : emailEngine?.provider === 'sendgrid'
+                ? '⚡ SendGrid (Enterprise — No 2,000/day limit)'
+                : '🟢 Gmail API (Google Workspace 2,000/day quota)'
+            },
             { label: 'Campaign Subject', value: campaignToDispatch.subject },
             { label: 'Target Audience', value: campaignToDispatch.targetSegmentId },
             { label: 'Eligible Recipients', value: eligibleCount },
             { label: 'Excluded Unsubscribed', value: excludedCount },
-            { label: 'Sender Account', value: userEmail || campaignToDispatch.senderEmail }
+            {
+              label: 'Sender Account',
+              value: emailEngine?.provider !== 'gmail'
+                ? `${emailEngine.fromName || 'HealthPulse'} <${emailEngine.fromEmail || 'newsletter@healthpulse.org'}>`
+                : (userEmail || campaignToDispatch.senderEmail)
+            }
           ]}
         />
       )}
@@ -690,6 +760,198 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Engine Configuration Modal (Gmail vs Resend/SendGrid) */}
+      {isEngineSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between p-4 px-6 border-b border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-100 text-purple-700 rounded-lg">
+                  <Zap className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Delivery Engine & Volume Settings</h3>
+                  <p className="text-[11px] text-slate-500">Choose between Gmail API and High-Volume Relay (&gt;2,000 emails at once)</p>
+                </div>
+              </div>
+              <button onClick={() => setIsEngineSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEngineSettings} className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-800 mb-2">Select Active Sending Engine:</label>
+                <div className="space-y-2">
+                  {/* Option 1: Gmail API */}
+                  <label
+                    onClick={() => setTempProvider('gmail')}
+                    className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      tempProvider === 'gmail'
+                        ? 'bg-cyan-50/60 border-cyan-400 text-cyan-950 ring-1 ring-cyan-400'
+                        : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="provider"
+                      checked={tempProvider === 'gmail'}
+                      onChange={() => setTempProvider('gmail')}
+                      className="mt-1 text-cyan-600 focus:ring-cyan-500"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">Gmail API (Google Workspace OAuth)</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">Standard</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Sends directly through your connected Gmail account. Limited by Google to <strong>2,000 emails/day</strong>.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Option 2: Resend (Recommended for High-Volume) */}
+                  <label
+                    onClick={() => setTempProvider('resend')}
+                    className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      tempProvider === 'resend'
+                        ? 'bg-purple-50/70 border-purple-400 text-purple-950 ring-1 ring-purple-400'
+                        : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="provider"
+                      checked={tempProvider === 'resend'}
+                      onChange={() => setTempProvider('resend')}
+                      className="mt-1 text-purple-600 focus:ring-purple-500"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">Resend API (High-Volume Engine)</span>
+                        <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                          Recommended for &gt;2,000+
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        High-deliverability enterprise infrastructure. Send <strong>5,000, 20,000, or 100,000+ emails at once</strong> with high speed and zero Google daily quotas.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Option 3: SendGrid */}
+                  <label
+                    onClick={() => setTempProvider('sendgrid')}
+                    className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      tempProvider === 'sendgrid'
+                        ? 'bg-blue-50/70 border-blue-400 text-blue-950 ring-1 ring-blue-400'
+                        : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="provider"
+                      checked={tempProvider === 'sendgrid'}
+                      onChange={() => setTempProvider('sendgrid')}
+                      className="mt-1 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">SendGrid API</span>
+                        <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold">Enterprise</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Twilio SendGrid high-volume transactional and marketing email relay.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Provider specific inputs */}
+              {tempProvider === 'resend' && (
+                <div className="p-4 bg-purple-50/50 rounded-xl border border-purple-200 space-y-3">
+                  <div>
+                    <label className="block font-semibold text-purple-950 mb-1">
+                      Resend API Key (re_...) *
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={emailEngine?.resendApiKey || 're_123456789_abcdef...'}
+                      value={tempResendKey}
+                      onChange={e => setTempResendKey(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-purple-200 rounded-lg text-xs font-mono focus:outline-purple-500"
+                    />
+                    <p className="text-[10px] text-purple-700 mt-1">
+                      Get your free API key at <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="underline font-bold">resend.com/api-keys</a>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {tempProvider === 'sendgrid' && (
+                <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-200 space-y-3">
+                  <div>
+                    <label className="block font-semibold text-blue-950 mb-1">
+                      SendGrid API Key (SG....) *
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={emailEngine?.sendgridApiKey || 'SG.abcdef...'}
+                      value={tempSendGridKey}
+                      onChange={e => setTempSendGridKey(e.target.value)}
+                      className="w-full p-2.5 bg-white border border-blue-200 rounded-lg text-xs font-mono focus:outline-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Sender address config for high-volume */}
+              {tempProvider !== 'gmail' && (
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Sender Name</label>
+                    <input
+                      type="text"
+                      value={tempFromName}
+                      onChange={e => setTempFromName(e.target.value)}
+                      placeholder="HealthPulse Editorial"
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">From Email Address</label>
+                    <input
+                      type="email"
+                      value={tempFromEmail}
+                      onChange={e => setTempFromEmail(e.target.value)}
+                      placeholder="newsletter@healthpulse.org"
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-3 border-t flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEngineSettingsOpen(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-slate-900 hover:bg-purple-700 text-white font-bold rounded-lg text-xs shadow-xs"
+                >
+                  Save Delivery Settings
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

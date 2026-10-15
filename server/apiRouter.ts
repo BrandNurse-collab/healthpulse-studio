@@ -18,6 +18,7 @@ import {
   isAiConfigured
 } from './gemini';
 import { executeCampaignSend } from './gmailSender';
+import { executeHighVolumeSend } from './highVolumeSender';
 
 // Helper to parse JSON body from incoming connect/express/vercel request
 export async function parseJsonBody(req: IncomingMessage): Promise<any> {
@@ -508,11 +509,79 @@ export async function handleApiRequest(
       return true;
     }
 
+    // EMAIL ENGINE SETTINGS (Gmail vs High-Volume Resend/SendGrid)
+    if (pathname === '/api/settings/email-engine' && method === 'GET') {
+      const engine = db.meta.emailEngine || { provider: 'gmail' };
+      // Mask keys
+      const safeEngine = {
+        ...engine,
+        resendApiKey: engine.resendApiKey ? `re_***${engine.resendApiKey.slice(-4)}` : '',
+        sendgridApiKey: engine.sendgridApiKey ? `SG.***${engine.sendgridApiKey.slice(-4)}` : '',
+        isConfigured: !!(
+          engine.provider === 'gmail' ||
+          (engine.provider === 'resend' && engine.resendApiKey) ||
+          (engine.provider === 'sendgrid' && engine.sendgridApiKey)
+        )
+      };
+      sendJson(res, 200, { emailEngine: safeEngine });
+      return true;
+    }
+
+    if (pathname === '/api/settings/email-engine' && method === 'POST') {
+      const body = await parseJsonBody(req);
+      db.meta.emailEngine = db.meta.emailEngine || { provider: 'gmail' };
+
+      if (body.provider) db.meta.emailEngine.provider = body.provider;
+      if (body.fromEmail) db.meta.emailEngine.fromEmail = body.fromEmail.trim();
+      if (body.fromName) db.meta.emailEngine.fromName = body.fromName.trim();
+
+      // Only update API keys if provided (not masked)
+      if (body.resendApiKey && !body.resendApiKey.includes('***')) {
+        db.meta.emailEngine.resendApiKey = body.resendApiKey.trim();
+      }
+      if (body.sendgridApiKey && !body.sendgridApiKey.includes('***')) {
+        db.meta.emailEngine.sendgridApiKey = body.sendgridApiKey.trim();
+      }
+
+      saveDb(db);
+      logAudit('email_engine_updated', 'campaign', `Updated email delivery provider to ${db.meta.emailEngine.provider.toUpperCase()}`);
+      sendJson(res, 200, { success: true, emailEngine: db.meta.emailEngine });
+      return true;
+    }
+
     if (pathname.startsWith('/api/campaigns/') && pathname.endsWith('/send') && method === 'POST') {
       const id = pathname.replace('/api/campaigns/', '').replace('/send', '');
       const body = await parseJsonBody(req);
+      const engine = db.meta.emailEngine || { provider: 'gmail' };
 
-      // Bearer token from Authorization header or body
+      // 1. High-Volume Provider (Resend or SendGrid) - NO 2,000/day LIMIT
+      if (engine.provider === 'resend' || engine.provider === 'sendgrid') {
+        const apiKey = engine.provider === 'resend' ? engine.resendApiKey : engine.sendgridApiKey;
+        if (!apiKey) {
+          sendJson(res, 400, {
+            error: `API key for ${engine.provider.toUpperCase()} is not configured. Please save your API key in Settings.`
+          });
+          return true;
+        }
+
+        try {
+          const campaign = await executeHighVolumeSend({
+            campaignId: id,
+            provider: engine.provider,
+            apiKey,
+            fromEmail: engine.fromEmail || body.senderEmail || 'newsletter@healthpulse.org',
+            fromName: engine.fromName || body.senderName || 'HealthPulse Editorial',
+            isTestSend: false
+          }, appUrl);
+
+          sendJson(res, 200, { campaign });
+        } catch (err: any) {
+          sendJson(res, 500, { error: err.message });
+        }
+        return true;
+      }
+
+      // 2. Gmail OAuth Provider (Subject to Google 2,000/day limit)
       const authHeader = req.headers.authorization;
       const accessToken = authHeader?.startsWith('Bearer ')
         ? authHeader.substring(7)
@@ -544,7 +613,45 @@ export async function handleApiRequest(
     if (pathname.startsWith('/api/campaigns/') && pathname.endsWith('/test-send') && method === 'POST') {
       const id = pathname.replace('/api/campaigns/', '').replace('/test-send', '');
       const body = await parseJsonBody(req);
+      const engine = db.meta.emailEngine || { provider: 'gmail' };
 
+      if (!body.testRecipientEmail) {
+        sendJson(res, 400, { error: 'Test recipient email is required.' });
+        return true;
+      }
+
+      // High-volume provider test send
+      if (engine.provider === 'resend' || engine.provider === 'sendgrid') {
+        const apiKey = engine.provider === 'resend' ? engine.resendApiKey : engine.sendgridApiKey;
+        if (!apiKey) {
+          sendJson(res, 400, {
+            error: `API key for ${engine.provider.toUpperCase()} is not configured.`
+          });
+          return true;
+        }
+
+        try {
+          await executeHighVolumeSend({
+            campaignId: id,
+            provider: engine.provider,
+            apiKey,
+            fromEmail: engine.fromEmail || body.senderEmail || 'newsletter@healthpulse.org',
+            fromName: engine.fromName || body.senderName || 'HealthPulse Editorial',
+            isTestSend: true,
+            testRecipientEmail: body.testRecipientEmail
+          }, appUrl);
+
+          sendJson(res, 200, {
+            success: true,
+            message: `Test preview successfully dispatched to ${body.testRecipientEmail} via ${engine.provider.toUpperCase()} (High-Volume Engine)`
+          });
+        } catch (err: any) {
+          sendJson(res, 500, { error: err.message });
+        }
+        return true;
+      }
+
+      // Gmail test send
       const authHeader = req.headers.authorization;
       const accessToken = authHeader?.startsWith('Bearer ')
         ? authHeader.substring(7)
@@ -552,11 +659,6 @@ export async function handleApiRequest(
 
       if (!accessToken) {
         sendJson(res, 401, { error: 'Gmail access token missing. Please connect Gmail first.' });
-        return true;
-      }
-
-      if (!body.testRecipientEmail) {
-        sendJson(res, 400, { error: 'Test recipient email is required.' });
         return true;
       }
 
@@ -570,7 +672,7 @@ export async function handleApiRequest(
           testRecipientEmail: body.testRecipientEmail
         }, appUrl);
 
-        sendJson(res, 200, { success: true, message: `Test email sent to ${body.testRecipientEmail}` });
+        sendJson(res, 200, { success: true, message: `Test email sent to ${body.testRecipientEmail} via Gmail API` });
       } catch (err: any) {
         sendJson(res, 500, { error: err.message });
       }
