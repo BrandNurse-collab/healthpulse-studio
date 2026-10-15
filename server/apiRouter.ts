@@ -19,8 +19,17 @@ import {
 } from './gemini';
 import { executeCampaignSend } from './gmailSender';
 
-// Helper to parse JSON body from incoming connect/express request
+// Helper to parse JSON body from incoming connect/express/vercel request
 export async function parseJsonBody(req: IncomingMessage): Promise<any> {
+  if ((req as any).body) {
+    if (typeof (req as any).body === 'object') return (req as any).body;
+    try {
+      return JSON.parse((req as any).body);
+    } catch {
+      return {};
+    }
+  }
+
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', chunk => {

@@ -160,7 +160,10 @@ export interface DatabaseSchema {
   };
 }
 
-const DATA_DIR = path.resolve(process.cwd(), '.data');
+const isServerless = process.env.VERCEL === '1' || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+const DATA_DIR = isServerless
+  ? path.resolve('/tmp', '.data')
+  : path.resolve(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'healthpulse_db.json');
 
 function ensureDataDir() {
