@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Sparkles, CheckCircle2, AlertCircle, LogOut, ExternalLink, Globe, LayoutDashboard } from 'lucide-react';
+import { Activity, Sparkles, CheckCircle2, AlertCircle, LogOut, ExternalLink, Globe, LayoutDashboard, ArrowRightLeft } from 'lucide-react';
 import { User } from 'firebase/auth';
 
 interface HeaderProps {
@@ -89,10 +89,24 @@ export const Header: React.FC<HeaderProps> = ({
                     </p>
                   </div>
                 </div>
+
+                {/* Quick Switch Account Button */}
+                <button
+                  onClick={async () => {
+                    await onSignOut();
+                    onSignIn();
+                  }}
+                  title="Switch to a different Google account"
+                  className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:text-cyan-800 bg-slate-100 hover:bg-cyan-50 rounded-lg border border-slate-200 transition-colors flex items-center gap-1"
+                >
+                  <ArrowRightLeft className="w-3 h-3 text-slate-500" />
+                  <span className="hidden sm:inline">Switch</span>
+                </button>
+
                 <button
                   onClick={onSignOut}
                   title="Disconnect Gmail Account"
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200"
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>

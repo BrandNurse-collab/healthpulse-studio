@@ -342,6 +342,20 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
             </button>
           )}
 
+          {emailEngine?.provider === 'gmail' && isGmailConnected && userEmail && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs">
+              <span className="text-slate-500 font-medium">Sending as:</span>
+              <span className="font-semibold text-slate-800 font-mono text-[11px] max-w-[150px] truncate">{userEmail}</span>
+              <button
+                onClick={onConnectGmail}
+                title="Switch to another Gmail account"
+                className="ml-1 text-cyan-700 hover:text-cyan-900 font-semibold underline text-[11px]"
+              >
+                Switch
+              </button>
+            </div>
+          )}
+
           <button
             onClick={handleOpenNewCampaign}
             className="px-4 py-2 bg-slate-900 hover:bg-cyan-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
